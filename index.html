@@ -164,6 +164,45 @@ textarea{resize:vertical;min-height:72px;}
 .ipc-info h4{font-family:'Playfair Display',serif;font-size:17px;}
 .ipc-info p{font-size:13px;color:rgba(255,255,255,.65);margin-top:2px;}
 
+
+/* ── LOGIN ── */
+#login-screen{
+  display:none;position:fixed;inset:0;background:var(--navy);
+  z-index:9999;align-items:center;justify-content:center;
+  flex-direction:column;
+}
+#login-screen.visible{display:flex;}
+.login-box{
+  background:var(--white);border-radius:16px;padding:40px 36px;
+  width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,.4);
+  text-align:center;
+}
+.login-logo{font-family:'Playfair Display',serif;font-size:28px;
+  color:var(--navy);margin-bottom:4px;}
+.login-sub{font-size:13px;color:var(--muted);margin-bottom:32px;}
+.login-label{display:block;font-size:13px;font-weight:600;
+  color:var(--carbon);text-align:left;margin-bottom:6px;
+  text-transform:uppercase;letter-spacing:.5px;}
+.login-input{width:100%;padding:13px 15px;border:1.5px solid var(--border);
+  border-radius:8px;font-size:16px;font-family:'Inter',sans-serif;
+  background:var(--cream);transition:border-color .2s;margin-bottom:16px;}
+.login-input:focus{outline:none;border-color:var(--navy);background:#fff;}
+.login-input.error{border-color:var(--danger);background:rgba(181,48,48,.04);}
+.login-btn{width:100%;padding:14px;background:var(--gold);color:#fff;
+  border:none;border-radius:8px;font-size:16px;font-weight:700;
+  font-family:'Inter',sans-serif;cursor:pointer;transition:background .2s;
+  margin-top:4px;}
+.login-btn:hover{background:var(--gold-light);}
+.login-error{color:var(--danger);font-size:13px;margin-top:10px;
+  min-height:18px;font-weight:500;}
+.login-footer{margin-top:24px;font-size:12px;color:var(--muted);}
+.login-decoration{position:absolute;width:300px;height:300px;
+  border-radius:50%;background:rgba(201,146,63,.08);
+  top:-80px;right:-80px;pointer-events:none;}
+.login-decoration2{position:absolute;width:200px;height:200px;
+  border-radius:50%;background:rgba(255,255,255,.04);
+  bottom:-60px;left:-60px;pointer-events:none;}
+
 /* ── MOBILE RESPONSIVE ── */
 /* ═══ DESKTOP LARGE (>1200px) ═══ */
 @media (min-width:1201px){
@@ -268,6 +307,25 @@ textarea{resize:vertical;min-height:72px;}
 </style>
 </head>
 <body>
+
+<!-- LOGIN SCREEN -->
+<div id="login-screen" class="visible">
+  <div class="login-decoration"></div>
+  <div class="login-decoration2"></div>
+  <div class="login-box">
+    <div class="login-logo">InmoGestión</div>
+    <div class="login-sub">Control de Arrendamientos</div>
+    <label class="login-label">Clave de Acceso</label>
+    <input class="login-input" type="password" id="login-input"
+      placeholder="Ingrese su clave"
+      onkeydown="if(event.key==='Enter')verificarClave()"
+      autocomplete="current-password">
+    <button class="login-btn" onclick="verificarClave()">Ingresar</button>
+    <div class="login-error" id="login-error"></div>
+    <div class="login-footer">InmoGestión v3.0 &mdash; Acceso seguro</div>
+  </div>
+</div>
+
 
 <!-- SIDEBAR -->
 <div id="sidebar-overlay" onclick="toggleSidebar()"></div>
@@ -473,7 +531,16 @@ textarea{resize:vertical;min-height:72px;}
         <div class="form-group"><label>Días alerta canon</label><input id="cfg-ant-canon" type="number" value="15"></div>
         <div class="form-group"><label>Días alerta servicio</label><input id="cfg-ant-serv" type="number" value="10"></div>
       </div>
-      <button class="btn btn-gold" onclick="guardarConfig()">&#128190; Guardar</button>
+      <h3 class="section-title" style="margin-top:20px">Seguridad</h3>
+      <div class="form-grid" style="margin-bottom:20px;">
+        <div class="form-group"><label>Clave de Acceso Actual</label><input id="cfg-clave-actual" type="password" placeholder="Clave actual"></div>
+        <div class="form-group"><label>Nueva Clave</label><input id="cfg-clave-nueva" type="password" placeholder="Nueva clave"></div>
+        <div class="form-group"><label>Confirmar Nueva Clave</label><input id="cfg-clave-confirm" type="password" placeholder="Repetir nueva clave"></div>
+        <div class="form-group" style="display:flex;align-items:flex-end">
+          <button class="btn btn-outline" onclick="cambiarClave()" style="width:100%">&#x1F512; Cambiar Clave</button>
+        </div>
+      </div>
+      <button class="btn btn-gold" onclick="guardarConfig()">&#128190; Guardar Configuración</button>
     </div>
   </div>
 
@@ -1781,10 +1848,95 @@ function renderPapelera() {
 // INIT
 // ============================================================
 window.addEventListener('load', async function(){
+  // Verificar sesión activa
+  if(!estaAutenticado()) {
+    document.getElementById('login-screen').classList.add('visible');
+    document.getElementById('login-input').focus();
+    // Cargar datos en segundo plano para que estén listos al ingresar
+    sincronizarDesdeNube();
+    return;
+  }
   await sincronizarDesdeNube();
   if(!DB.get('config').length) DB.set('config',[{empresa:'InmoGestión',nit:'',direccion:'',telefono:''}]);
   showPage('dashboard');
 });
+
+
+// ============================================================
+// SISTEMA DE LOGIN
+// ============================================================
+var SESSION_KEY = 'img_session';
+var MAX_INTENTOS = 5;
+var BLOQUEO_MIN = 15;
+
+function getClaveMaestra() {
+  var cfg = DB.get('config');
+  var c = (Array.isArray(cfg) && cfg.length) ? cfg[0] : {};
+  return c.claveMaestra || 'inmogestion2025'; // clave por defecto
+}
+
+function estaAutenticado() {
+  try {
+    var s = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
+    if(!s) return false;
+    // Sesión válida por 8 horas
+    if(Date.now() - s.ts > 8 * 60 * 60 * 1000) {
+      sessionStorage.removeItem(SESSION_KEY);
+      return false;
+    }
+    return true;
+  } catch(e) { return false; }
+}
+
+function verificarClave() {
+  var input = document.getElementById('login-input');
+  var errorEl = document.getElementById('login-error');
+  var clave = input.value;
+
+  // Verificar bloqueo temporal
+  var bloqueo = JSON.parse(localStorage.getItem('img_bloqueo') || 'null');
+  if(bloqueo && Date.now() < bloqueo.hasta) {
+    var minRestantes = Math.ceil((bloqueo.hasta - Date.now()) / 60000);
+    errorEl.textContent = 'Demasiados intentos. Espere ' + minRestantes + ' minuto(s).';
+    input.classList.add('error');
+    return;
+  }
+
+  if(clave === getClaveMaestra()) {
+    // Login exitoso
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ ts: Date.now() }));
+    localStorage.removeItem('img_intentos');
+    localStorage.removeItem('img_bloqueo');
+    input.value = '';
+    input.classList.remove('error');
+    errorEl.textContent = '';
+    document.getElementById('login-screen').classList.remove('visible');
+  } else {
+    // Clave incorrecta
+    var intentos = parseInt(localStorage.getItem('img_intentos') || '0') + 1;
+    localStorage.setItem('img_intentos', intentos);
+    input.classList.add('error');
+    input.value = '';
+    input.focus();
+
+    var restantes = MAX_INTENTOS - intentos;
+    if(restantes <= 0) {
+      // Bloquear
+      var hasta = Date.now() + BLOQUEO_MIN * 60 * 1000;
+      localStorage.setItem('img_bloqueo', JSON.stringify({ hasta: hasta }));
+      localStorage.setItem('img_intentos', '0');
+      errorEl.textContent = 'Cuenta bloqueada por ' + BLOQUEO_MIN + ' minutos.';
+    } else {
+      errorEl.textContent = 'Clave incorrecta. ' + restantes + ' intento(s) restante(s).';
+    }
+  }
+}
+
+function cerrarSesion() {
+  sessionStorage.removeItem(SESSION_KEY);
+  document.getElementById('login-screen').classList.add('visible');
+  document.getElementById('login-input').focus();
+}
 
 // ── MOBILE SIDEBAR ───────────────────────────────────────────────
 function toggleSidebar(){
@@ -1819,6 +1971,7 @@ function importarJSON(event){var file=event.target.files[0];if(!file)return;var 
 // ── SHOW PAGE override ───────────────────────────────────────────
 var _sp0=showPage;
 showPage=function(p){
+  if(!estaAutenticado()){cerrarSesion();return;}
   document.querySelectorAll('.page').forEach(function(x){x.classList.remove('active');});
   document.querySelectorAll('.nav-item').forEach(function(x){x.classList.remove('active');});
   var pg=document.getElementById('page-'+p);if(pg)pg.classList.add('active');
@@ -1944,6 +2097,31 @@ function renderMora(){
   if(!list.length){tbody.innerHTML='<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--muted)">'+(lista.length?'Sin resultados.':'Sin registros.')+'</td></tr>';return;}
   tbody.innerHTML=list.slice().sort(function(a,b){return(b.diasMora||0)-(a.diasMora||0);}).map(function(m){var eb=m.estado==='Mora'?'badge-mora':m.estado==='Pagado'?'badge-success':'badge-warning';return'<tr class="'+(m.estado==='Mora'?'row-mora':'')+'"><td><strong>'+(m.propCodigo||'')+'</strong><br><small>'+(m.propNombre||'')+'</small></td><td>'+m.arrendatario+'</td><td>'+m.periodo+'</td><td>'+fmt(m.canon)+'</td><td><span class="dias-chip '+(m.diasMora>0?m.estado==='Mora'?'dc-mora':'dc-warn':'dc-ok')+'">'+m.diasMora+'d</span></td><td>'+(m.tasaDiaria?(m.tasaDiaria*30).toFixed(2)+'%':'\u2014')+'</td><td style="color:var(--danger)">'+fmt(m.intereses)+'</td><td><strong>'+fmt(m.total)+'</strong></td><td><span class="badge '+eb+' badge-dot">'+m.estado+'</span></td><td style="display:flex;gap:4px;flex-wrap:wrap">'+(m.estado!=='Pagado'?'<button class="btn btn-sm btn-outline" onclick="liquidarIntereses('+m.id+')" style="font-size:.7rem">&#x1F4B0;</button><button class="btn-icon" onclick="marcarMoraPagado('+m.id+')">&#x2705;</button>':'')+'<button class="btn-icon" onclick="abrirModalMora('+m.id+')">&#x270F;&#xFE0F;</button><button class="btn-icon" onclick="deleteItem(\'mora\','+m.id+',renderMora)">&#x1F5D1;&#xFE0F;</button></td></tr>';}).join('');
 }
+
+function cambiarClave() {
+  var actual = document.getElementById('cfg-clave-actual').value;
+  var nueva = document.getElementById('cfg-clave-nueva').value;
+  var confirm2 = document.getElementById('cfg-clave-confirm').value;
+  var maestra = getClaveMaestra();
+
+  if(!actual || !nueva || !confirm2) { alert('Complete todos los campos de clave.'); return; }
+  if(actual !== maestra) { alert('La clave actual es incorrecta.'); return; }
+  if(nueva.length < 4) { alert('La nueva clave debe tener al menos 4 caracteres.'); return; }
+  if(nueva !== confirm2) { alert('La nueva clave y la confirmación no coinciden.'); return; }
+
+  var cfg = DB.get('config');
+  if(Array.isArray(cfg) && cfg.length) {
+    cfg[0].claveMaestra = nueva;
+  } else {
+    cfg = [{ empresa: 'InmoGestión', claveMaestra: nueva }];
+  }
+  DB.set('config', cfg);
+  document.getElementById('cfg-clave-actual').value = '';
+  document.getElementById('cfg-clave-nueva').value = '';
+  document.getElementById('cfg-clave-confirm').value = '';
+  mostrarToast('✅ Clave actualizada correctamente.', 3000);
+}
+
 function filtroMoraLimpiar(){document.getElementById('filtro-mora-inmueble').value='';document.getElementById('filtro-mora-estado').value='';renderMora();}
 
 // ── DASHBOARD override ───────────────────────────────────────────
