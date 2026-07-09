@@ -1872,7 +1872,19 @@ var BLOQUEO_MIN = 15;
 function getClaveMaestra() {
   var cfg = DB.get('config');
   var c = (Array.isArray(cfg) && cfg.length) ? cfg[0] : {};
-  return c.claveMaestra || 'inmogestion2025'; // clave por defecto
+  return c.claveMaestra || 'inmogestion2025';
+}
+
+function getCfgCompleto() {
+  var arr = DB.get('config');
+  var c = (Array.isArray(arr) && arr.length) ? arr[0] : {};
+  return {
+    empresa: c.empresa||'InmoGestion', nit: c.nit||'',
+    direccion: c.direccion||'', telefono: c.telefono||'', email: c.email||'',
+    preaviso: +c.preaviso||90, antCanon: +c.antCanon||15, antServ: +c.antServ||10,
+    diasGracia: +c.diasGracia||5, tasaMora: +c.tasaMora||1.5,
+    claveMaestra: c.claveMaestra||'inmogestion2025'
+  };
 }
 
 function estaAutenticado() {
@@ -1961,7 +1973,23 @@ function calcDiasCorte(corte){if(!corte)return null;var hoy=new Date();var c=new
 function calcDiasMora(fv){if(!fv)return 0;var d=diffDays(fv,today());return d>0?d:0;}
 
 // ── CONFIG ───────────────────────────────────────────────────────
-function guardarConfig(){var cfg=getCfg();cfg.empresa=document.getElementById('cfg-empresa').value.trim();cfg.nit=document.getElementById('cfg-nit').value.trim();cfg.direccion=document.getElementById('cfg-direccion').value.trim();cfg.telefono=document.getElementById('cfg-tel').value.trim();cfg.email=document.getElementById('cfg-email').value.trim();cfg.preaviso=+document.getElementById('cfg-preaviso').value||90;cfg.antCanon=+document.getElementById('cfg-ant-canon').value||15;cfg.antServ=+document.getElementById('cfg-ant-serv').value||10;cfg.diasGracia=+document.getElementById('cfg-dias-gracia').value||5;cfg.tasaMora=+document.getElementById('cfg-tasa-mora').value||1.5;DB.set('config',[cfg]);alert('Configuracion guardada.');}
+function guardarConfig(){
+  // Usar getCfgCompleto para NO perder la claveMaestra al guardar
+  var cfg = getCfgCompleto();
+  cfg.empresa = document.getElementById('cfg-empresa').value.trim();
+  cfg.nit = document.getElementById('cfg-nit').value.trim();
+  cfg.direccion = document.getElementById('cfg-direccion').value.trim();
+  cfg.telefono = document.getElementById('cfg-tel').value.trim();
+  cfg.email = document.getElementById('cfg-email').value.trim();
+  cfg.preaviso = +document.getElementById('cfg-preaviso').value||90;
+  cfg.antCanon = +document.getElementById('cfg-ant-canon').value||15;
+  cfg.antServ = +document.getElementById('cfg-ant-serv').value||10;
+  cfg.diasGracia = +document.getElementById('cfg-dias-gracia').value||5;
+  cfg.tasaMora = +document.getElementById('cfg-tasa-mora').value||1.5;
+  // claveMaestra se preserva de getCfgCompleto — NO se sobreescribe aqui
+  DB.set('config', [cfg]);
+  mostrarToast('✅ Configuración guardada.', 2500);
+}
 function renderConfig(){var c=getCfg();document.getElementById('cfg-empresa').value=c.empresa;document.getElementById('cfg-nit').value=c.nit;document.getElementById('cfg-direccion').value=c.direccion;document.getElementById('cfg-tel').value=c.telefono;document.getElementById('cfg-email').value=c.email||'';document.getElementById('cfg-preaviso').value=c.preaviso;document.getElementById('cfg-ant-canon').value=c.antCanon;document.getElementById('cfg-ant-serv').value=c.antServ;document.getElementById('cfg-dias-gracia').value=c.diasGracia;document.getElementById('cfg-tasa-mora').value=c.tasaMora;}
 
 // ── BACKUP ───────────────────────────────────────────────────────
@@ -2104,22 +2132,33 @@ function cambiarClave() {
   var confirm2 = document.getElementById('cfg-clave-confirm').value;
   var maestra = getClaveMaestra();
 
-  if(!actual || !nueva || !confirm2) { alert('Complete todos los campos de clave.'); return; }
-  if(actual !== maestra) { alert('La clave actual es incorrecta.'); return; }
-  if(nueva.length < 4) { alert('La nueva clave debe tener al menos 4 caracteres.'); return; }
-  if(nueva !== confirm2) { alert('La nueva clave y la confirmación no coinciden.'); return; }
-
-  var cfg = DB.get('config');
-  if(Array.isArray(cfg) && cfg.length) {
-    cfg[0].claveMaestra = nueva;
-  } else {
-    cfg = [{ empresa: 'InmoGestión', claveMaestra: nueva }];
+  if(!actual || !nueva || !confirm2) {
+    alert('Complete todos los campos de clave.');
+    return;
   }
-  DB.set('config', cfg);
+  if(actual !== maestra) {
+    alert('❌ Clave actual incorrecta.');
+    document.getElementById('cfg-clave-actual').value = '';
+    document.getElementById('cfg-clave-actual').focus();
+    return;
+  }
+  if(nueva.length < 4) {
+    alert('La nueva clave debe tener al menos 4 caracteres.');
+    return;
+  }
+  if(nueva !== confirm2) {
+    alert('La nueva clave y la confirmación no coinciden.');
+    document.getElementById('cfg-clave-confirm').value = '';
+    return;
+  }
+  // Preservar toda la configuracion actual y solo cambiar la clave
+  var cfg = getCfgCompleto();
+  cfg.claveMaestra = nueva;
+  DB.set('config', [cfg]);
   document.getElementById('cfg-clave-actual').value = '';
   document.getElementById('cfg-clave-nueva').value = '';
   document.getElementById('cfg-clave-confirm').value = '';
-  mostrarToast('✅ Clave actualizada correctamente.', 3000);
+  mostrarToast('✅ Clave actualizada. Próxima sesión usará la nueva clave.', 4000);
 }
 
 function filtroMoraLimpiar(){document.getElementById('filtro-mora-inmueble').value='';document.getElementById('filtro-mora-estado').value='';renderMora();}
